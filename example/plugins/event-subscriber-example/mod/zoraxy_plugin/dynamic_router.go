@@ -18,9 +18,10 @@ import (
 type SniffResult int
 
 const (
-	SniffResultAccept SniffResult = iota // Forward the request to this plugin dynamic capture ingress
-	SniffResultSkip                      // Skip this plugin and let the next plugin handle the request
-	SniffResultDeny                      // Ask Zoraxy to reject the request; see DynamicSniffForwardRequest.Deny for status and reason
+	SniffResultAccept   SniffResult = iota // Forward the request to this plugin dynamic capture ingress
+	SniffResultSkip                        // Skip this plugin and let the next plugin handle the request
+	SniffResultDeny                        // Ask Zoraxy to reject the request; see DynamicSniffForwardRequest.Deny for status and reason
+	SniffResultNeedBody                    // Ask Zoraxy to call the sniff handler again with a body prefix; see DynamicSniffForwardRequest.NeedBody
 )
 
 type SniffHandler func(*DynamicSniffForwardRequest) SniffResult
@@ -67,6 +68,12 @@ func (p *PathRouter) RegisterDynamicSniffHandler(sniff_ingress string, mux *http
 		if sniffResult == SniffResultAccept {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("OK"))
+		} else if sniffResult == SniffResultNeedBody && !payload.BodyIncluded {
+			if payload.needBodyLimit > 0 {
+				w.Header().Set("X-Zoraxy-Body-Limit", strconv.Itoa(payload.needBodyLimit))
+			}
+			w.WriteHeader(int(ControlStatusCode_NEED_BODY))
+			w.Write([]byte("NEED_BODY"))
 		} else if sniffResult == SniffResultDeny {
 			status := payload.denyStatus
 			if status < 400 || status > 599 {
@@ -131,11 +138,19 @@ type DynamicSniffForwardRequest struct {
 	ProtoMajor int                 `json:"proto_major"`
 	ProtoMinor int                 `json:"proto_minor"`
 
+	// Only set on the second sniff call after SniffResultNeedBody. Body holds
+	// at most the requested prefix; BodyTruncated tells whether the request
+	// body was longer than that.
+	BodyIncluded  bool   `json:"body_included,omitempty"`
+	Body          []byte `json:"body,omitempty"`
+	BodyTruncated bool   `json:"body_truncated,omitempty"`
+
 	/* Internal use */
-	denyStatus  int           `json:"-"`
-	denyReason  string        `json:"-"`
-	rawRequest  *http.Request `json:"-"`
-	requestUUID string        `json:"-"`
+	needBodyLimit int           `json:"-"`
+	denyStatus    int           `json:"-"`
+	denyReason    string        `json:"-"`
+	rawRequest    *http.Request `json:"-"`
+	requestUUID   string        `json:"-"`
 }
 
 // GetForwardRequestPayload returns a DynamicSniffForwardRequest object from an http.Request object.
@@ -188,4 +203,14 @@ func (dsfr *DynamicSniffForwardRequest) Deny(status int, reason string) SniffRes
 	dsfr.denyStatus = status
 	dsfr.denyReason = reason
 	return SniffResultDeny
+}
+
+// NeedBody asks Zoraxy to call the sniff handler a second time with up to
+// limit bytes of the request body (0 = Zoraxy default of 64 KiB, hard cap
+// 1 MiB). On that second call BodyIncluded is true and Body holds the prefix.
+// Returning SniffResultNeedBody when BodyIncluded is already true counts as
+// skip. Return this from the sniff handler after calling it.
+func (dsfr *DynamicSniffForwardRequest) NeedBody(limit int) SniffResult {
+	dsfr.needBodyLimit = limit
+	return SniffResultNeedBody
 }

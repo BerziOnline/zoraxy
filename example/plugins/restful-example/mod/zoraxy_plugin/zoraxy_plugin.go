@@ -34,6 +34,7 @@ const (
 	ControlStatusCode_UNHANDLED ControlStatusCode = 284 //Traffic not handled by plugin, ask Zoraxy to process the traffic
 	ControlStatusCode_ERROR     ControlStatusCode = 580 //Error occurred while processing the traffic, ask Zoraxy to process the traffic and log the error
 	ControlStatusCode_DENY      ControlStatusCode = 286 //Dynamic capture sniff only: ask Zoraxy to reject the request with the status in X-Zoraxy-Deny-Status (default 403) and not forward it
+	ControlStatusCode_NEED_BODY ControlStatusCode = 287 //Dynamic capture sniff only: ask Zoraxy to send the sniff payload again with up to X-Zoraxy-Body-Limit bytes of the request body
 )
 
 type SubscriptionEvent struct {
