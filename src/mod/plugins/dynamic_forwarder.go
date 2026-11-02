@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -105,6 +106,17 @@ func (p *Plugin) HandleDynamicRoute(w http.ResponseWriter, r *http.Request, clie
 	// Create an instance of CustomRequest with the original request's data
 	forwardReq := zoraxy_plugin.EncodeForwardRequestPayload(r, clientIP)
 
+	// A plugin that declared dynamic_capture_sniff_body_kb gets a bounded
+	// prefix of the request body with its one sniff call.
+	if limit := sniffBodyLimit(p.Spec.DynamicCaptureSniffBodyKB); limit > 0 && requestHasBody(r) {
+		if err := attachSniffBody(r, &forwardReq, limit); err != nil {
+			// The client broke off the upload. The request cannot complete,
+			// and forwarding the part read so far would skip the sniffer.
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return true, nil
+		}
+	}
+
 	// Encode the custom request object into JSON
 	jsonData, err := json.Marshal(forwardReq)
 	if err != nil {
@@ -162,4 +174,48 @@ func (p *Plugin) HandleDynamicRoute(w http.ResponseWriter, r *http.Request, clie
 		},
 	})
 	return true, nil
+}
+
+// sniffBodyMaxKB caps the body prefix a plugin can ask for.
+const sniffBodyMaxKB = 1024
+
+// sniffBodyLimit turns the declared KiB into bytes: 0 for none, at most 1 MiB.
+func sniffBodyLimit(kb int) int {
+	if kb <= 0 {
+		return 0
+	}
+	if kb > sniffBodyMaxKB {
+		kb = sniffBodyMaxKB
+	}
+	return kb * 1024
+}
+
+// requestHasBody reports whether the request carries a body (known length or chunked).
+func requestHasBody(r *http.Request) bool {
+	return r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0
+}
+
+// attachSniffBody reads at most limit bytes of the request body into the
+// sniff payload and puts them back in front of the remaining body, so the
+// upstream (or the plugin ingress) still sees the complete, unchanged request.
+func attachSniffBody(r *http.Request, payload *zoraxy_plugin.DynamicSniffForwardRequest, limit int) error {
+	original := r.Body
+	// One byte more than the limit tells whether the body is longer.
+	buf, err := io.ReadAll(io.LimitReader(original, int64(limit)+1))
+	if err != nil {
+		return err
+	}
+	r.Body = &replayBody{Reader: io.MultiReader(bytes.NewReader(buf), original), Closer: original}
+	payload.BodyIncluded = true
+	if len(buf) > limit {
+		payload.BodyTruncated = true
+		buf = buf[:limit]
+	}
+	payload.Body = buf
+	return nil
+}
+
+type replayBody struct {
+	io.Reader
+	io.Closer
 }
