@@ -99,6 +99,16 @@ type IntroSpect struct {
 	DynamicCaptureSniff   string `json:"dynamic_capture_sniff"`   //Dynamic capture sniff path of your plugin (e.g. /d_sniff)
 	DynamicCaptureIngress string `json:"dynamic_capture_ingress"` //Dynamic capture ingress path of your plugin (e.g. /d_handler)
 
+	/*
+		Request body for the sniff handler (optional)
+
+		How many KiB of the request body Zoraxy sends with the sniff call, for
+		plugins that must look at the body (e.g. a WAF). 0 = headers only. Capped
+		at 1024. Zoraxy reads the prefix before the sniff call and passes the
+		complete, unchanged body on to the upstream or the ingress afterwards.
+	*/
+	DynamicCaptureSniffBodyKB int `json:"dynamic_capture_sniff_body_kb,omitempty"`
+
 	/* UI Path for your plugin */
 	UIPath string `json:"ui_path"` //UI path of your plugin (e.g. /ui), will proxy the whole subpath tree to Zoraxy Web UI as plugin UI
 

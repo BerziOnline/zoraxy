@@ -131,6 +131,15 @@ type DynamicSniffForwardRequest struct {
 	ProtoMajor int                 `json:"proto_major"`
 	ProtoMinor int                 `json:"proto_minor"`
 
+	// Only set when the plugin declared dynamic_capture_sniff_body_kb and the
+	// request has a body. Body holds at most that many KiB of the client's
+	// request body; BodyTruncated tells whether the body was longer. This is
+	// the only place the client's body appears: GetRequest() is the sniff
+	// call itself, its body is this JSON document.
+	BodyIncluded  bool   `json:"body_included,omitempty"`
+	Body          []byte `json:"body,omitempty"`
+	BodyTruncated bool   `json:"body_truncated,omitempty"`
+
 	/* Internal use */
 	denyStatus  int           `json:"-"`
 	denyReason  string        `json:"-"`
